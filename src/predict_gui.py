@@ -372,7 +372,7 @@ class PredictorServer(HTTPServer):
 
 def main():
     predictor = Predictor()
-    server = PredictorServer(("0.0.0.0", 0), predictor)
+    server = PredictorServer(("0.0.0.0", 12345), predictor)
     url = f"http://0.0.0.0:{server.server_port}/"
     print(f"Laptop Part Classifier is running at {url}")
     print("Press Ctrl+C in this terminal to close it.")
