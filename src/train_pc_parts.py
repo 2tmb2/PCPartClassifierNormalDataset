@@ -13,7 +13,7 @@ from torchvision.models import ResNet18_Weights
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "pc_parts"
 EPOCHS = 100
-BATCH_SIZE = 128
+BATCH_SIZE = 1
 LEARNING_RATE = 1e-3
 OUTPUT_DIR = ROOT / "models" / "pc_parts"
 GRAPH_DIR = OUTPUT_DIR / "graphs"
