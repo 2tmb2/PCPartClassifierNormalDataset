@@ -1,2 +1,10 @@
-# PCPartClassifier
-CSSEMA416 Final Project to classify PC parts, written in Python with Jupyter Notebooks
+---
+title: PCPartsClassifier
+emoji: 💻
+colorFrom: black
+colorTo: red
+sdk: gradio
+sdk_version: 4.0.0
+app_file: predict_gui.py
+pinned: false
+---
