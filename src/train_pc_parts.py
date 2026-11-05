@@ -185,15 +185,17 @@ def run_epoch(classifier, loader, loss_fn, device, optimizer=None):
     return total_loss / total, total_correct / total
 
 
-def checkpoint_path(validation_accuracy):
+def checkpoint_path(validation_accuracy, epochs_run, best_epoch, stopped_early):
+    completion = "earlystop" if stopped_early else "completed"
     filename = (
         f"valacc{validation_accuracy * 100:06.2f}pct_pc_parts_resnet18_"
-        f"epochs{EPOCHS}_batchsize{BATCH_SIZE}_learningrate{LEARNING_RATE}.pth"
+        f"epochs{epochs_run}_maxepochs{EPOCHS}_bestepoch{best_epoch}_{completion}_"
+        f"batchsize{BATCH_SIZE}_learningrate{LEARNING_RATE}.pth"
     )
     return OUTPUT_DIR / filename
 
 
-def save_loss_plot(train_losses, validation_losses, validation_accuracy):
+def save_loss_plot(train_losses, validation_losses, output_path):
     figure, axis = plt.subplots()
     epochs = range(1, len(train_losses) + 1)
     axis.plot(epochs, train_losses, label="Training loss")
@@ -204,14 +206,20 @@ def save_loss_plot(train_losses, validation_losses, validation_accuracy):
     axis.legend()
     figure.tight_layout()
 
-    graph_path = GRAPH_DIR / checkpoint_path(validation_accuracy).with_suffix(".png").name
+    graph_path = GRAPH_DIR / output_path.with_suffix(".png").name
     graph_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(graph_path)
     plt.close(figure)
     return graph_path
 
 
-def train() -> None:
+def train(*, early_stopping_patience: int | None = None) -> dict:
+    if early_stopping_patience is not None and (
+        isinstance(early_stopping_patience, bool)
+        or not isinstance(early_stopping_patience, int)
+        or early_stopping_patience <= 0
+    ):
+        raise ValueError("Early stopping patience must be a positive integer or None.")
     torch.manual_seed(SEED)
     device = torch.device(
         "cuda" if torch.cuda.is_available()
@@ -242,6 +250,9 @@ def train() -> None:
     best_state = None
     train_losses = []
     validation_losses = []
+    best_validation_loss = float("inf")
+    epochs_without_improvement = 0
+    stopped_early = False
 
     print(f"Device: {device} | Classes: {class_names}")
     for epoch in range(1, EPOCHS + 1):
@@ -264,8 +275,26 @@ def train() -> None:
             best_epoch = epoch
             best_state = deepcopy(model.fc.state_dict())
 
+        if validation_loss < best_validation_loss:
+            best_validation_loss = validation_loss
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+        if (
+            early_stopping_patience is not None
+            and epochs_without_improvement >= early_stopping_patience
+        ):
+            stopped_early = epoch < EPOCHS
+            print(
+                f"Early stopping at epoch {epoch}: validation loss has not "
+                f"improved for {early_stopping_patience} epochs."
+            )
+            break
+
     model.fc.load_state_dict(best_state)
-    output_path = checkpoint_path(best_accuracy)
+    output_path = checkpoint_path(
+        best_accuracy, len(train_losses), best_epoch, stopped_early
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
@@ -276,14 +305,25 @@ def train() -> None:
             "image_std": STD,
             "validation_accuracy": best_accuracy,
             "best_epoch": best_epoch,
+            "epochs_run": len(train_losses),
+            "early_stopping_patience": early_stopping_patience,
+            "stopped_early": stopped_early,
             "model_state_dict": model.state_dict(),
         },
         output_path,
     )
-    graph_path = save_loss_plot(train_losses, validation_losses, best_accuracy)
+    graph_path = save_loss_plot(train_losses, validation_losses, output_path)
     print(f"Best validation accuracy: {best_accuracy:.2%} at epoch {best_epoch}")
     print(f"Saved model to {output_path}")
     print(f"Saved loss graph to {graph_path}")
+    return {
+        "best_accuracy": best_accuracy,
+        "best_epoch": best_epoch,
+        "best_validation_loss": best_validation_loss,
+        "epochs_run": len(train_losses),
+        "stopped_early": stopped_early,
+        "checkpoint_path": str(output_path),
+    }
 
 
 if __name__ == "__main__":

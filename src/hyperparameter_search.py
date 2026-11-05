@@ -4,13 +4,12 @@ Tests multiple configurations and compares results.
 """
 import itertools
 import json
-from pathlib import Path
 from datetime import datetime
 import torch
 from train_pc_parts import train as original_train
 import train_pc_parts
 
-def run_hyperparameter_search(configs):
+def run_hyperparameter_search(configs, *, early_stopping_patience=30):
     """
     Run training with multiple hyperparameter combinations.
     
@@ -20,9 +19,17 @@ def run_hyperparameter_search(configs):
         {
             'LEARNING_RATE': [1e-4, 5e-4, 1e-3],
             'BATCH_SIZE': [64, 128, 256],
-            'OPTIMIZER': ['SGD', 'Adam', 'AdamW'],
+            'EPOCHS': [500],
         }
+        early_stopping_patience: Stop a trial after this many epochs without
+            lower validation loss. Use None to disable early stopping.
     """
+    if early_stopping_patience is not None and (
+        isinstance(early_stopping_patience, bool)
+        or not isinstance(early_stopping_patience, int)
+        or early_stopping_patience <= 0
+    ):
+        raise ValueError("Early stopping patience must be a positive integer or None.")
     results = []
     results_dir = train_pc_parts.OUTPUT_DIR / "hyperparameter_search_results"
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -49,16 +56,16 @@ def run_hyperparameter_search(configs):
         
         try:
             # Run training
-            original_train()
-            
-            # Note: The training function saves the best model and prints results
-            # We'll capture the best accuracy from the most recent checkpoint
-            best_acc = get_latest_model_accuracy(train_pc_parts.OUTPUT_DIR)
+            training_result = original_train(
+                early_stopping_patience=early_stopping_patience
+            )
+            best_acc = training_result["best_accuracy"]
             
             result = {
                 'combination_id': combo_idx,
                 'hyperparameters': combo_dict,
-                'best_accuracy': best_acc,
+                **training_result,
+                'early_stopping_patience': early_stopping_patience,
                 'timestamp': datetime.now().isoformat(),
             }
             results.append(result)
@@ -105,31 +112,12 @@ def run_hyperparameter_search(configs):
     return valid_results
 
 
-def get_latest_model_accuracy(model_dir):
-    """Extract accuracy from the most recent model checkpoint filename."""
-    model_files = list(model_dir.glob("valacc*.pth"))
-    if not model_files:
-        return None
-    
-    # Get the most recent file
-    latest = max(model_files, key=lambda p: p.stat().st_mtime)
-    
-    # Extract accuracy from filename: valacc{accuracy}pct_...
-    filename = latest.stem
-    try:
-        acc_str = filename.split('valacc')[1].split('pct')[0]
-        accuracy = float(acc_str) / 100
-        return accuracy
-    except (IndexError, ValueError):
-        return None
-
-
 if __name__ == "__main__":
     # Quick configuration search
     quick_configs = {
-        'LEARNING_RATE': [1e-6, 1e-4, 1e-5],
-        'BATCH_SIZE': [32, 64, 128, 256],
-        'EPOCHS': [100, 300, 500],
+        'LEARNING_RATE': [1e-3, 1e-4, 1e-5],
+        'BATCH_SIZE': [32, 64],
+        'EPOCHS': [500],
     }
     
     print("Starting hyperparameter search...")
