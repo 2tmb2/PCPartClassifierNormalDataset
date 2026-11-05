@@ -112,6 +112,9 @@ HTML_PAGE = """<!doctype html>
     #prediction { color: var(--green); font-size: 20px; }
     #confidence { color: var(--muted); font-size: 13px; margin-top: 4px; }
     #status { min-height: 22px; color: var(--muted); font-size: 13px; margin-top: 14px; }
+    #classes { max-height: 300px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; padding: 8px; font-size: 13px; }
+    .class-item { padding: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .class-item:nth-child(odd) { background: var(--paper); }
     @media (max-width: 760px) {
       header { align-items: flex-start; flex-direction: column; gap: 3px; }
       main { grid-template-columns: 1fr; width: min(100% - 24px, 600px); margin: 12px auto; gap: 12px; }
@@ -147,6 +150,10 @@ HTML_PAGE = """<!doctype html>
         <div class="eyebrow">Predicted class</div>
         <div id="prediction" class="value">-</div>
         <div id="confidence"></div>
+      </div>
+      <div class="result">
+        <div class="eyebrow">Available classes</div>
+        <div id="classes">Select a model to see available classes.</div>
       </div>
       <div id="status" role="status">Choose an image and model.</div>
     </section>
@@ -201,6 +208,33 @@ HTML_PAGE = """<!doctype html>
     }
 
     imageInput.addEventListener("change", updatePreview);
+    
+    modelSelect.addEventListener("change", async () => {
+      const classesDiv = document.querySelector("#classes");
+      if (!modelSelect.value) {
+        classesDiv.textContent = "Select a model to see available classes.";
+        return;
+      }
+      try {
+        classesDiv.textContent = "Loading classes...";
+        const response = await fetch(`/api/classes?model=${modelSelect.value}`);
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not load classes.");
+        classesDiv.replaceChildren();
+        for (const className of result.classes) {
+          const item = document.createElement("div");
+          item.className = "class-item";
+          item.textContent = className;
+          item.title = className;
+          classesDiv.append(item);
+        }
+      } catch (error) {
+        classesDiv.textContent = `Error: ${error.message}`;
+      }
+    });
+    
+    imageInput.addEventListener("change", updatePreview);
+    
     runButton.addEventListener("click", async () => {
       const file = imageInput.files[0];
       if (!file || !modelSelect.value) return;
@@ -331,6 +365,20 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "device": str(predictor.device),
                 "models": [{"path": path} for path in predictor.models],
             })
+            return
+
+        if request.path == "/api/classes":
+            predictor = self.server.predictor
+            query = parse_qs(urlparse(self.path).query)
+            model_path = query.get("model", [""])[0]
+            if model_path not in predictor.models:
+                self.send_json(400, {"error": "Select a listed model."})
+                return
+            try:
+                predictor.load_model(model_path)
+                self.send_json(200, {"classes": predictor.class_names})
+            except Exception as error:
+                self.send_json(400, {"error": str(error)})
             return
 
         self.send_error(404)
