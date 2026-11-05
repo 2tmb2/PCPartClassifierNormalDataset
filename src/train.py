@@ -3,6 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import torch
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from torch import nn
 from torch.utils.data import ConcatDataset, DataLoader, Subset, TensorDataset
@@ -11,10 +12,11 @@ from torchvision.models import ResNet18_Weights
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "laptop_parts"
-EPOCHS = 1000
+EPOCHS = 5000
 BATCH_SIZE = 128
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 0.001
 OUTPUT_DIR = ROOT / "models"
+GRAPH_DIR = OUTPUT_DIR / "graphs"
 FEATURE_CACHE_PATH = ROOT / "models" / "laptop_parts_resnet18_features.pth"
 VALIDATION_FRACTION = 0.2
 SEED = 42
@@ -193,6 +195,24 @@ def checkpoint_path(validation_accuracy):
     return OUTPUT_DIR / filename
 
 
+def save_loss_plot(train_losses, validation_losses, validation_accuracy):
+    figure, axis = plt.subplots()
+    epochs = range(1, len(train_losses) + 1)
+    axis.plot(epochs, train_losses, label="Training loss")
+    axis.plot(epochs, validation_losses, label="Validation loss")
+    axis.set_xlabel("Epoch")
+    axis.set_ylabel("Loss")
+    axis.set_title("Training and Validation Loss")
+    axis.legend()
+    figure.tight_layout()
+
+    graph_path = GRAPH_DIR / checkpoint_path(validation_accuracy).with_suffix(".png").name
+    graph_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(graph_path)
+    plt.close(figure)
+    return graph_path
+
+
 def train() -> None:
     torch.manual_seed(SEED)
     device = torch.device(
@@ -222,6 +242,8 @@ def train() -> None:
     optimizer = torch.optim.SGD(params=model.fc.parameters(), lr=LEARNING_RATE)
     best_accuracy = -1.0
     best_state = None
+    train_losses = []
+    validation_losses = []
 
     print(f"Device: {device} | Classes: {len(class_names)}")
     for epoch in range(1, EPOCHS + 1):
@@ -232,6 +254,8 @@ def train() -> None:
         val_loss, val_accuracy = run_epoch(
             model.fc, validation_loader, cost_function, device
         )
+        train_losses.append(train_loss)
+        validation_losses.append(val_loss)
         print(
             f"Epoch {epoch}/{EPOCHS}: "
             f"train loss {train_loss:.4f}, accuracy {train_accuracy:.2%}; "
@@ -259,13 +283,9 @@ def train() -> None:
         output_path,
     )
     print(f"Best validation accuracy: {best_accuracy:.2%}; saved to {output_path}")
+    graph_path = save_loss_plot(train_losses, validation_losses, best_accuracy)
+    print(f"Saved loss graph to {graph_path}")
 
 
 if __name__ == "__main__":
-    for epochs in [10, 100, 1000, 10000]:
-        EPOCHS = epochs
-        for batchsize in [256, 128, 64, 32]:
-            BATCH_SIZE = batchsize
-            for learningrate in [1e-1, 1e-2, 1e-3, 1e-4]:
-                LEARNING_RATE = learningrate
-                train()
+    train()
