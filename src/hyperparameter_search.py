@@ -127,13 +127,18 @@ def get_latest_model_accuracy(model_dir):
 if __name__ == "__main__":
     # Quick configuration search
     quick_configs = {
-        'LEARNING_RATE': [1e-4, 5e-4, 1e-3],
-        'BATCH_SIZE': [64, 128],
-        'EPOCHS': [200, 300],
+        'LEARNING_RATE': [1e-6, 1e-4, 1e-5],
+        'BATCH_SIZE': [32, 64, 128, 256],
+        'EPOCHS': [100, 300, 500],
     }
     
     print("Starting hyperparameter search...")
-    print(f"Device: {torch.device('cuda' if torch.cuda.is_available() else 'cpu')}")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available()
+        else "cpu"
+    )
+    print(f"Device: {device}")
     
     results = run_hyperparameter_search(quick_configs)
     

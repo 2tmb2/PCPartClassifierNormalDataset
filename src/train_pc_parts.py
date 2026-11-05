@@ -237,7 +237,7 @@ def train() -> None:
     print(f"Dataset: {len(dataset)} images | Classes: {len(class_names)}")
 
     loss_function = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.fc.parameters(), lr=LEARNING_RATE)
+    optimizer = torch.optim.Adam(model.fc.parameters(), lr=LEARNING_RATE)
     best_accuracy = -1.0
     best_state = None
     train_losses = []
