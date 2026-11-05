@@ -13,11 +13,7 @@ from torchvision.models import ResNet18_Weights
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "models"
-IMAGE_DIRS = {
-  "binaryheart_laptop_parts": ROOT / "binaryheart_laptop_parts",
-  "internet_laptop_parts": ROOT / "internet_laptop_parts",
-}
-IMAGE_EXTENSIONS = {".avif", ".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
+MAX_UPLOAD_SIZE = 20 * 1024 * 1024
 
 HTML_PAGE = """<!doctype html>
 <html lang="en">
@@ -78,7 +74,7 @@ HTML_PAGE = """<!doctype html>
       font-weight: 650;
       text-transform: uppercase;
     }
-    select, button {
+    select, input, button {
       min-height: 42px;
       width: 100%;
       border: 1px solid var(--line);
@@ -132,10 +128,10 @@ HTML_PAGE = """<!doctype html>
   <main>
     <section class="panel" aria-label="Image preview">
       <div class="field">
-        <label for="image">Image from either dataset folder</label>
-        <select id="image" disabled></select>
+        <label for="image">Choose an image from your computer</label>
+        <input id="image" type="file" accept="image/*" disabled>
       </div>
-      <div id="preview" class="preview">Select an image to preview it.</div>
+      <div id="preview" class="preview">Choose an image to preview it.</div>
     </section>
     <section class="panel" aria-label="Prediction controls and result">
       <div class="field">
@@ -156,20 +152,31 @@ HTML_PAGE = """<!doctype html>
     </section>
   </main>
   <script>
-    const imageSelect = document.querySelector("#image");
+    const imageInput = document.querySelector("#image");
     const modelSelect = document.querySelector("#model");
     const runButton = document.querySelector("#run");
     const status = document.querySelector("#status");
-    const encodePath = value => encodeURIComponent(value);
+    let previewUrl = null;
 
     function updatePreview() {
-      const path = imageSelect.value;
-      document.querySelector("#actual").textContent = path ? path.split("/").pop() : "-";
+      const file = imageInput.files[0];
+      document.querySelector("#actual").textContent = file ? file.name : "-";
       document.querySelector("#prediction").textContent = "-";
       document.querySelector("#confidence").textContent = "";
-      document.querySelector("#preview").innerHTML = path
-        ? `<img alt="Selected image" src="/api/image?path=${encodePath(path)}&v=${Date.now()}">`
-        : "No images found in the dataset folder.";
+      const preview = document.querySelector("#preview");
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = file ? URL.createObjectURL(file) : null;
+      preview.replaceChildren();
+      if (previewUrl) {
+        const image = document.createElement("img");
+        image.alt = "Selected image";
+        image.src = previewUrl;
+        image.onerror = () => { preview.textContent = "This file cannot be previewed as an image."; };
+        preview.append(image);
+      } else {
+        preview.textContent = "Choose an image to preview it.";
+      }
+      runButton.disabled = !modelSelect.value || !file;
     }
 
     async function initialize() {
@@ -184,35 +191,27 @@ HTML_PAGE = """<!doctype html>
           option.textContent = model.path;
           modelSelect.append(option);
         }
-        for (const image of options.images) {
-          const option = document.createElement("option");
-          option.value = image.path;
-          option.textContent = image.path;
-          imageSelect.append(option);
-        }
         modelSelect.disabled = options.models.length === 0;
-        imageSelect.disabled = options.images.length === 0;
-        runButton.disabled = options.models.length === 0 || options.images.length === 0;
-        if (!options.models.length) status.textContent = "No model checkpoints found in models/.";
-        else if (!options.images.length) status.textContent = "No supported images found in either image folder.";
-        else {
-          status.textContent = "Ready.";
-          updatePreview();
-        }
+        imageInput.disabled = options.models.length === 0;
+        runButton.disabled = true;
+        status.textContent = options.models.length ? "Choose an image and model." : "No model checkpoints found in models/.";
       } catch (error) {
         status.textContent = error.message;
       }
     }
 
-    imageSelect.addEventListener("change", updatePreview);
+    imageInput.addEventListener("change", updatePreview);
     runButton.addEventListener("click", async () => {
+      const file = imageInput.files[0];
+      if (!file || !modelSelect.value) return;
       runButton.disabled = true;
       status.textContent = "Running inference...";
       try {
-        const response = await fetch("/api/predict", {
+        const query = new URLSearchParams({ model: modelSelect.value, filename: file.name });
+        const response = await fetch(`/api/predict?${query}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: modelSelect.value, image: imageSelect.value })
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Prediction failed.");
@@ -223,7 +222,7 @@ HTML_PAGE = """<!doctype html>
       } catch (error) {
         status.textContent = error.message;
       } finally {
-        runButton.disabled = false;
+        runButton.disabled = !modelSelect.value || !imageInput.files[0];
       }
     });
 
@@ -242,7 +241,6 @@ class Predictor:
             else "cpu"
         )
         self.models = self.find_models()
-        self.images = self.find_images()
         self.loaded_model_path = None
         self.model = None
         self.transform = None
@@ -259,18 +257,6 @@ class Predictor:
             and path.suffix.lower() in {".pth", ".pt"}
             and "feature" not in path.stem.lower()
         }
-
-    @staticmethod
-    def find_images():
-      images = {}
-      for folder_name, folder_path in IMAGE_DIRS.items():
-        if not folder_path.is_dir():
-          continue
-        for path in sorted(folder_path.rglob("*")):
-          if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
-            relative_path = path.relative_to(folder_path).as_posix()
-            images[f"{folder_name}/{relative_path}"] = path
-      return dict(sorted(images.items()))
 
     def load_model(self, relative_path):
         model_path = self.models[relative_path]
@@ -302,18 +288,17 @@ class Predictor:
         self.transform = image_transform
         self.loaded_model_path = model_path
 
-    def predict(self, model_relative_path, image_relative_path):
-        self.load_model(model_relative_path)
-        image_path = self.images[image_relative_path]
-        with Image.open(image_path) as image:
-            input_tensor = self.transform(image.convert("RGB")).unsqueeze(0)
-        input_tensor = input_tensor.to(self.device)
+    def predict(self, model_relative_path, image_bytes, filename):
+      self.load_model(model_relative_path)
+      with Image.open(BytesIO(image_bytes)) as image:
+        input_tensor = self.transform(image.convert("RGB")).unsqueeze(0)
+      input_tensor = input_tensor.to(self.device)
 
-        with torch.inference_mode():
-            probabilities = torch.softmax(self.model(input_tensor), dim=1)[0]
+      with torch.inference_mode():
+        probabilities = torch.softmax(self.model(input_tensor), dim=1)[0]
         predicted_index = int(probabilities.argmax().item())
         return {
-            "actual": image_path.name,
+            "actual": Path(filename).name,
             "predicted": self.class_names[predicted_index],
             "confidence": probabilities[predicted_index].item(),
             "model": model_relative_path,
@@ -345,28 +330,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(200, {
                 "device": str(predictor.device),
                 "models": [{"path": path} for path in predictor.models],
-                "images": [{"path": path} for path in predictor.images],
             })
-            return
-
-        if request.path == "/api/image":
-            relative_path = parse_qs(request.query).get("path", [""])[0]
-            image_path = self.server.predictor.images.get(relative_path)
-            if image_path is None:
-                self.send_error(404, "Image not found")
-                return
-            try:
-                with Image.open(image_path) as image:
-                    output = BytesIO()
-                    image.convert("RGB").save(output, format="JPEG")
-                body = output.getvalue()
-                self.send_response(200)
-                self.send_header("Content-Type", "image/jpeg")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            except OSError:
-                self.send_error(415, "Could not read image")
             return
 
         self.send_error(404)
@@ -376,19 +340,23 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         try:
-            content_length = int(self.headers.get("Content-Length", "0"))
-            if content_length > 4096:
+          content_length = int(self.headers.get("Content-Length", "0"))
+          if content_length <= 0:
+            self.send_json(400, {"error": "Choose an image to upload."})
+            return
+          if content_length > MAX_UPLOAD_SIZE:
                 self.send_json(413, {"error": "Request is too large."})
                 return
-            payload = json.loads(self.rfile.read(content_length))
-            model_path = payload["model"]
-            image_path = payload["image"]
-            predictor = self.server.predictor
-            if model_path not in predictor.models or image_path not in predictor.images:
-                self.send_json(400, {"error": "Select a listed model and image."})
-                return
-            result = predictor.predict(model_path, image_path)
-            self.send_json(200, result)
+          query = parse_qs(urlparse(self.path).query)
+          model_path = query.get("model", [""])[0]
+          filename = query.get("filename", [""])[0]
+          predictor = self.server.predictor
+          if model_path not in predictor.models:
+            self.send_json(400, {"error": "Select a listed model."})
+            return
+          image_bytes = self.rfile.read(content_length)
+          result = predictor.predict(model_path, image_bytes, filename)
+          self.send_json(200, result)
         except Exception as error:
             self.send_json(400, {"error": str(error)})
 
