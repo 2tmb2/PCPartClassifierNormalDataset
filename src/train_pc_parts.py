@@ -12,14 +12,14 @@ from torchvision.models import ResNet18_Weights
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "pc_parts"
-EPOCHS = 500
-BATCH_SIZE = 128
+EPOCHS = 50
+BATCH_SIZE = 32
 LEARNING_RATE = 1e-4
 OUTPUT_DIR = ROOT / "models" / "pc_parts"
 GRAPH_DIR = OUTPUT_DIR / "graphs"
 FEATURE_CACHE_PATH = OUTPUT_DIR / "pc_parts_resnet18_features.pth"
 VALIDATION_FRACTION = 0.2
-SEED = 42
+SEED = 41
 NUM_WORKERS = 0
 AUGMENTATION_COPIES = 4
 ROTATION_DEGREES = 15
