@@ -108,9 +108,14 @@ HTML_PAGE = """<!doctype html>
     .preview img { display: block; max-width: 100%; max-height: 520px; object-fit: contain; }
     .result { border-top: 1px solid var(--line); padding-top: 20px; margin-top: 20px; }
     .result + .result { margin-top: 16px; }
+    .runner-up { border-top: none; padding-top: 0; margin-top: 12px; }
+    .runner-up .eyebrow { font-size: 11px; margin-bottom: 4px; }
+    .runner-up .value { font-size: 14px; }
+    .runner-up #confidence-2, .runner-up #confidence-3 { font-size: 12px; }
     .value { overflow-wrap: anywhere; font-size: 16px; font-weight: 650; }
     #prediction { color: var(--green); font-size: 20px; }
     #confidence { color: var(--muted); font-size: 13px; margin-top: 4px; }
+    #confidence-2, #confidence-3 { color: var(--muted); font-size: 12px; margin-top: 2px; }
     #status { min-height: 22px; color: var(--muted); font-size: 13px; margin-top: 14px; }
     #classes { max-height: 300px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; padding: 8px; font-size: 13px; }
     .class-item { padding: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -151,6 +156,16 @@ HTML_PAGE = """<!doctype html>
         <div id="prediction" class="value">-</div>
         <div id="confidence"></div>
       </div>
+      <div class="result runner-up">
+        <div class="eyebrow">2nd Place</div>
+        <div id="prediction-2" class="value">-</div>
+        <div id="confidence-2"></div>
+      </div>
+      <div class="result runner-up">
+        <div class="eyebrow">3rd Place</div>
+        <div id="prediction-3" class="value">-</div>
+        <div id="confidence-3"></div>
+      </div>
       <div class="result">
         <div class="eyebrow">Available classes</div>
         <div id="classes">Select a model to see available classes.</div>
@@ -170,6 +185,10 @@ HTML_PAGE = """<!doctype html>
       document.querySelector("#actual").textContent = file ? file.name : "-";
       document.querySelector("#prediction").textContent = "-";
       document.querySelector("#confidence").textContent = "";
+      document.querySelector("#prediction-2").textContent = "-";
+      document.querySelector("#confidence-2").textContent = "";
+      document.querySelector("#prediction-3").textContent = "-";
+      document.querySelector("#confidence-3").textContent = "";
       const preview = document.querySelector("#preview");
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       previewUrl = file ? URL.createObjectURL(file) : null;
@@ -202,6 +221,10 @@ HTML_PAGE = """<!doctype html>
         imageInput.disabled = options.models.length === 0;
         runButton.disabled = true;
         status.textContent = options.models.length ? "Choose an image and model." : "No model checkpoints found in models/.";
+        if (options.models.length > 0) {
+          modelSelect.value = options.models[0].path;
+          modelSelect.dispatchEvent(new Event("change"));
+        }
       } catch (error) {
         status.textContent = error.message;
       }
@@ -233,8 +256,6 @@ HTML_PAGE = """<!doctype html>
       }
     });
     
-    imageInput.addEventListener("change", updatePreview);
-    
     runButton.addEventListener("click", async () => {
       const file = imageInput.files[0];
       if (!file || !modelSelect.value) return;
@@ -252,6 +273,14 @@ HTML_PAGE = """<!doctype html>
         document.querySelector("#actual").textContent = result.actual;
         document.querySelector("#prediction").textContent = result.predicted;
         document.querySelector("#confidence").textContent = `Confidence: ${(result.confidence * 100).toFixed(1)}%`;
+        if (result.top_predictions && result.top_predictions.length > 1) {
+          document.querySelector("#prediction-2").textContent = result.top_predictions[1].class;
+          document.querySelector("#confidence-2").textContent = `Confidence: ${(result.top_predictions[1].confidence * 100).toFixed(1)}%`;
+        }
+        if (result.top_predictions && result.top_predictions.length > 2) {
+          document.querySelector("#prediction-3").textContent = result.top_predictions[2].class;
+          document.querySelector("#confidence-3").textContent = `Confidence: ${(result.top_predictions[2].confidence * 100).toFixed(1)}%`;
+        }
         status.textContent = `Predicted with ${result.model}.`;
       } catch (error) {
         status.textContent = error.message;
@@ -330,11 +359,18 @@ class Predictor:
 
       with torch.inference_mode():
         probabilities = torch.softmax(self.model(input_tensor), dim=1)[0]
-        predicted_index = int(probabilities.argmax().item())
+        top_3_probs, top_3_indices = torch.topk(probabilities, k=3)
+        top_3_probs = top_3_probs.cpu().numpy().tolist()
+        top_3_indices = top_3_indices.cpu().numpy().tolist()
+        
         return {
             "actual": Path(filename).name,
-            "predicted": self.class_names[predicted_index],
-            "confidence": probabilities[predicted_index].item(),
+            "predicted": self.class_names[top_3_indices[0]],
+            "confidence": top_3_probs[0],
+            "top_predictions": [
+                {"class": self.class_names[idx], "confidence": conf}
+                for idx, conf in zip(top_3_indices, top_3_probs)
+            ],
             "model": model_relative_path,
         }
 
