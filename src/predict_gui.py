@@ -95,6 +95,25 @@ HTML_PAGE = """<!doctype html>
     button:hover { background: var(--green-dark); }
     button:active { transform: translateY(1px); }
     button:disabled { cursor: wait; opacity: .65; }
+    #camera-dialog {
+      width: min(680px, calc(100% - 24px));
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 20px;
+      color: var(--ink);
+    }
+    #camera-dialog::backdrop { background: rgb(18 31 25 / 70%); }
+    #camera-video {
+      display: block;
+      width: 100%;
+      max-height: 65vh;
+      margin-bottom: 14px;
+      background: #101713;
+      object-fit: contain;
+    }
+    .camera-actions { display: flex; gap: 10px; }
+    .camera-actions button { flex: 1; }
+    #cancel-camera { background: #64736c; }
     .preview {
       min-height: 390px;
       display: grid;
@@ -139,6 +158,7 @@ HTML_PAGE = """<!doctype html>
         <label for="image">Choose an image from your computer</label>
         <input id="image" type="file" accept="image/*" disabled>
       </div>
+      <button id="open-camera" type="button" disabled>Take a photo</button>
       <div id="preview" class="preview">Choose an image to preview it.</div>
     </section>
     <section class="panel" aria-label="Prediction controls and result">
@@ -173,15 +193,27 @@ HTML_PAGE = """<!doctype html>
       <div id="status" role="status">Choose an image and model.</div>
     </section>
   </main>
+  <dialog id="camera-dialog" aria-label="Take a photo">
+    <video id="camera-video" autoplay playsinline></video>
+    <div class="camera-actions">
+      <button id="capture-photo" type="button">Capture photo</button>
+      <button id="cancel-camera" type="button">Cancel</button>
+    </div>
+  </dialog>
   <script>
     const imageInput = document.querySelector("#image");
     const modelSelect = document.querySelector("#model");
     const runButton = document.querySelector("#run");
+    const cameraButton = document.querySelector("#open-camera");
+    const cameraDialog = document.querySelector("#camera-dialog");
+    const cameraVideo = document.querySelector("#camera-video");
     const status = document.querySelector("#status");
     let previewUrl = null;
+    let currentFile = null;
+    let cameraStream = null;
 
-    function updatePreview() {
-      const file = imageInput.files[0];
+    function updatePreview(file) {
+      currentFile = file;
       document.querySelector("#actual").textContent = file ? file.name : "-";
       document.querySelector("#prediction").textContent = "-";
       document.querySelector("#confidence").textContent = "";
@@ -202,7 +234,36 @@ HTML_PAGE = """<!doctype html>
       } else {
         preview.textContent = "Choose an image to preview it.";
       }
-      runButton.disabled = !modelSelect.value || !file;
+      runButton.disabled = !modelSelect.value || !currentFile;
+    }
+
+    function stopCamera() {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+      }
+      cameraVideo.srcObject = null;
+    }
+
+    async function openCamera() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        status.textContent = "Camera access is not available in this browser.";
+        return;
+      }
+      cameraDialog.showModal();
+      status.textContent = "Waiting for camera permission...";
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (!cameraDialog.open) {
+          stopCamera();
+          return;
+        }
+        cameraVideo.srcObject = cameraStream;
+        status.textContent = "Position the part in view, then capture a photo.";
+      } catch (error) {
+        cameraDialog.close();
+        status.textContent = `Could not access the camera: ${error.message}`;
+      }
     }
 
     async function initialize() {
@@ -219,6 +280,7 @@ HTML_PAGE = """<!doctype html>
         }
         modelSelect.disabled = options.models.length === 0;
         imageInput.disabled = options.models.length === 0;
+        cameraButton.disabled = options.models.length === 0;
         runButton.disabled = true;
         status.textContent = options.models.length ? "Choose an image and model." : "No model checkpoints found in models/.";
         if (options.models.length > 0) {
@@ -230,7 +292,31 @@ HTML_PAGE = """<!doctype html>
       }
     }
 
-    imageInput.addEventListener("change", updatePreview);
+    imageInput.addEventListener("change", () => updatePreview(imageInput.files[0] || null));
+    cameraButton.addEventListener("click", openCamera);
+    document.querySelector("#cancel-camera").addEventListener("click", () => cameraDialog.close());
+    cameraDialog.addEventListener("close", stopCamera);
+    document.querySelector("#capture-photo").addEventListener("click", () => {
+      if (!cameraVideo.videoWidth || !cameraVideo.videoHeight) {
+        status.textContent = "The camera is not ready yet.";
+        return;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = cameraVideo.videoWidth;
+      canvas.height = cameraVideo.videoHeight;
+      canvas.getContext("2d").drawImage(cameraVideo, 0, 0);
+      canvas.toBlob(blob => {
+        if (!blob) {
+          status.textContent = "Could not capture a photo. Please try again.";
+          return;
+        }
+        const filename = `webcam-${new Date().toISOString().replaceAll(":", "-")}.jpg`;
+        imageInput.value = "";
+        updatePreview(new File([blob], filename, { type: "image/jpeg" }));
+        cameraDialog.close();
+        status.textContent = "Photo captured. Run prediction when ready.";
+      }, "image/jpeg", 0.92);
+    });
     
     modelSelect.addEventListener("change", async () => {
       const classesDiv = document.querySelector("#classes");
@@ -257,7 +343,7 @@ HTML_PAGE = """<!doctype html>
     });
     
     runButton.addEventListener("click", async () => {
-      const file = imageInput.files[0];
+      const file = currentFile;
       if (!file || !modelSelect.value) return;
       runButton.disabled = true;
       status.textContent = "Running inference...";
@@ -285,7 +371,7 @@ HTML_PAGE = """<!doctype html>
       } catch (error) {
         status.textContent = error.message;
       } finally {
-        runButton.disabled = !modelSelect.value || !imageInput.files[0];
+        runButton.disabled = !modelSelect.value || !currentFile;
       }
     });
 
