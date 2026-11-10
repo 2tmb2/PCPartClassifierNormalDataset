@@ -1,4 +1,5 @@
 import json
+import mimetypes
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from io import BytesIO
@@ -13,6 +14,8 @@ from torchvision.models import ResNet18_Weights
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "models"
+UPLOADED_FILES_DIR = ROOT / "uploaded_files"
+IMAGE_SUFFIXES = {".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 MAX_UPLOAD_SIZE = 20 * 1024 * 1024
 
 HTML_PAGE = """<!doctype html>
@@ -66,6 +69,13 @@ HTML_PAGE = """<!doctype html>
       padding: 22px;
     }
     .field { margin-bottom: 18px; }
+    .image-sources {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(180px, .8fr);
+      gap: 10px;
+    }
+    .image-sources > div { min-width: 0; }
+    #image { min-width: 0; }
     label, .eyebrow {
       display: block;
       margin-bottom: 7px;
@@ -145,6 +155,9 @@ HTML_PAGE = """<!doctype html>
       .panel { padding: 17px; }
       .preview { min-height: 250px; }
     }
+    @media (max-width: 500px) {
+      .image-sources { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -155,8 +168,18 @@ HTML_PAGE = """<!doctype html>
   <main>
     <section class="panel" aria-label="Image preview">
       <div class="field">
-        <label for="image">Choose an image from your computer</label>
-        <input id="image" type="file" accept="image/*" disabled>
+        <div class="image-sources">
+          <div>
+            <label for="image">Browse this computer</label>
+            <input id="image" type="file" accept="image/*" disabled>
+          </div>
+          <div>
+            <label for="uploaded-file">Select a file</label>
+            <select id="uploaded-file" disabled>
+              <option value="">Loading uploaded files...</option>
+            </select>
+          </div>
+        </div>
       </div>
       <input id="camera-upload" type="file" accept="image/*" capture="environment" hidden>
       <button id="open-camera" type="button" disabled>Take a photo</button>
@@ -204,6 +227,7 @@ HTML_PAGE = """<!doctype html>
   <script>
     const imageInput = document.querySelector("#image");
     const cameraUploadInput = document.querySelector("#camera-upload");
+    const uploadedFileSelect = document.querySelector("#uploaded-file");
     const modelSelect = document.querySelector("#model");
     const runButton = document.querySelector("#run");
     const cameraButton = document.querySelector("#open-camera");
@@ -214,8 +238,9 @@ HTML_PAGE = """<!doctype html>
     let currentFile = null;
     let cameraStream = null;
 
-    function updatePreview(file) {
+    function updatePreview(file, uploadedFileName = "") {
       currentFile = file;
+      uploadedFileSelect.value = uploadedFileName;
       document.querySelector("#actual").textContent = file ? file.name : "-";
       document.querySelector("#prediction").textContent = "-";
       document.querySelector("#confidence").textContent = "";
@@ -284,18 +309,53 @@ HTML_PAGE = """<!doctype html>
         modelSelect.disabled = options.models.length === 0;
         imageInput.disabled = options.models.length === 0;
         cameraButton.disabled = options.models.length === 0;
+        uploadedFileSelect.disabled = true;
         runButton.disabled = true;
         status.textContent = options.models.length ? "Choose an image and model." : "No model checkpoints found in models/.";
         if (options.models.length > 0) {
           modelSelect.value = options.models[0].path;
           modelSelect.dispatchEvent(new Event("change"));
         }
+        const uploadedResponse = await fetch("/api/uploaded-files");
+        const uploadedResult = await uploadedResponse.json();
+        if (!uploadedResponse.ok) throw new Error(uploadedResult.error || "Could not load uploaded files.");
+        uploadedFileSelect.replaceChildren();
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = uploadedResult.files.length ? "Choose an uploaded file..." : "No image files found";
+        uploadedFileSelect.append(placeholder);
+        for (const fileName of uploadedResult.files) {
+          const option = document.createElement("option");
+          option.value = fileName;
+          option.textContent = fileName;
+          uploadedFileSelect.append(option);
+        }
+        uploadedFileSelect.disabled = options.models.length === 0 || uploadedResult.files.length === 0;
       } catch (error) {
         status.textContent = error.message;
       }
     }
 
     imageInput.addEventListener("change", () => updatePreview(imageInput.files[0] || null));
+    uploadedFileSelect.addEventListener("change", async () => {
+      const fileName = uploadedFileSelect.value;
+      if (!fileName) return;
+      status.textContent = `Loading ${fileName}...`;
+      try {
+        const query = new URLSearchParams({ name: fileName });
+        const response = await fetch(`/api/uploaded-file?${query}`);
+        if (!response.ok) {
+          const result = await response.json();
+          throw new Error(result.error || "Could not load the selected file.");
+        }
+        const blob = await response.blob();
+        updatePreview(new File([blob], fileName, { type: blob.type || "application/octet-stream" }), fileName);
+        status.textContent = "Uploaded file selected. Run prediction when ready.";
+      } catch (error) {
+        uploadedFileSelect.value = "";
+        status.textContent = error.message;
+      }
+    });
     cameraUploadInput.addEventListener("change", () => {
       const file = cameraUploadInput.files[0] || null;
       cameraUploadInput.value = "";
@@ -496,6 +556,48 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "models": [{"path": path} for path in predictor.models],
             })
             return
+
+        if request.path == "/api/uploaded-files":
+          upload_root = UPLOADED_FILES_DIR.resolve()
+          files = sorted(
+            path.name
+            for path in UPLOADED_FILES_DIR.iterdir()
+            if path.is_file()
+            and path.suffix.lower() in IMAGE_SUFFIXES
+            and path.resolve().parent == upload_root
+          ) if UPLOADED_FILES_DIR.is_dir() else []
+          self.send_json(200, {"files": files})
+          return
+
+        if request.path == "/api/uploaded-file":
+          query = parse_qs(request.query)
+          file_name = query.get("name", [""])[0]
+          file_path = UPLOADED_FILES_DIR / file_name
+          try:
+            resolved_path = file_path.resolve(strict=True)
+          except OSError:
+            self.send_json(404, {"error": "Uploaded file not found."})
+            return
+          if (
+            not file_name
+            or Path(file_name).name != file_name
+            or resolved_path.parent != UPLOADED_FILES_DIR.resolve()
+            or resolved_path.suffix.lower() not in IMAGE_SUFFIXES
+            or not resolved_path.is_file()
+          ):
+            self.send_json(404, {"error": "Uploaded file not found."})
+            return
+          file_size = resolved_path.stat().st_size
+          if file_size > MAX_UPLOAD_SIZE:
+            self.send_json(413, {"error": "Selected file is too large."})
+            return
+          body = resolved_path.read_bytes()
+          self.send_response(200)
+          self.send_header("Content-Type", mimetypes.guess_type(resolved_path.name)[0] or "application/octet-stream")
+          self.send_header("Content-Length", str(len(body)))
+          self.end_headers()
+          self.wfile.write(body)
+          return
 
         if request.path == "/api/classes":
             predictor = self.server.predictor
