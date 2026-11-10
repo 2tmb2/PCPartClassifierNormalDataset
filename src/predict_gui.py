@@ -107,6 +107,7 @@ HTML_PAGE = """<!doctype html>
     button:disabled { cursor: wait; opacity: .65; }
     #select-image { background: #315f73; }
     #select-image:hover { background: #24495c; }
+    #model { overflow: hidden; text-overflow: ellipsis; }
     #camera-dialog {
       width: min(680px, calc(100% - 24px));
       border: 1px solid var(--line);
@@ -153,11 +154,11 @@ HTML_PAGE = """<!doctype html>
     .class-item:nth-child(odd) { background: var(--paper); }
     @media (max-width: 760px) {
       header { align-items: flex-start; flex-direction: column; gap: 3px; }
-      main { grid-template-columns: 1fr; width: min(100% - 24px, 600px); margin: 12px auto; gap: 12px; }
-      .panel { padding: 17px; }
-      select, input, button { font-size: 16px; }
+      main { grid-template-columns: minmax(0, 1fr); width: min(100% - 24px, 600px); margin: 12px auto; gap: 12px; }
+      .panel { min-width: 0; padding: 17px; }
+      select, input, button { min-width: 0; max-width: 100%; font-size: 16px; }
       #select-image { min-height: 50px; }
-      .preview { height: min(42dvh, 320px); min-height: 200px; aspect-ratio: 4 / 3; }
+      .preview { width: 100%; min-width: 0; height: min(42dvh, 320px); min-height: 200px; aspect-ratio: 4 / 3; overflow-wrap: anywhere; }
       .preview img { max-height: 100%; }
       #camera-dialog { max-height: calc(100dvh - 24px); overflow-y: auto; padding: 14px; }
       #camera-video { max-height: min(65vh, calc(100dvh - 190px)); }
