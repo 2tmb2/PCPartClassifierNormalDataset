@@ -153,10 +153,17 @@ HTML_PAGE = """<!doctype html>
       header { align-items: flex-start; flex-direction: column; gap: 3px; }
       main { grid-template-columns: 1fr; width: min(100% - 24px, 600px); margin: 12px auto; gap: 12px; }
       .panel { padding: 17px; }
-      .preview { min-height: 250px; }
+      select, input, button { font-size: 16px; }
+      #open-camera { min-height: 50px; margin-bottom: 12px; }
+      .preview { height: min(42dvh, 320px); min-height: 200px; aspect-ratio: 4 / 3; }
+      .preview img { max-height: 100%; }
+      #camera-dialog { max-height: calc(100dvh - 24px); overflow-y: auto; padding: 14px; }
+      #camera-video { max-height: min(65vh, calc(100dvh - 190px)); }
+      .camera-actions button { min-height: 48px; }
     }
     @media (max-width: 500px) {
       .image-sources { grid-template-columns: 1fr; }
+      .image-sources { gap: 12px; }
     }
   </style>
 </head>
