@@ -158,6 +158,7 @@ HTML_PAGE = """<!doctype html>
         <label for="image">Choose an image from your computer</label>
         <input id="image" type="file" accept="image/*" disabled>
       </div>
+      <input id="camera-upload" type="file" accept="image/*" capture="environment" hidden>
       <button id="open-camera" type="button" disabled>Take a photo</button>
       <div id="preview" class="preview">Choose an image to preview it.</div>
     </section>
@@ -202,6 +203,7 @@ HTML_PAGE = """<!doctype html>
   </dialog>
   <script>
     const imageInput = document.querySelector("#image");
+    const cameraUploadInput = document.querySelector("#camera-upload");
     const modelSelect = document.querySelector("#model");
     const runButton = document.querySelector("#run");
     const cameraButton = document.querySelector("#open-camera");
@@ -247,7 +249,8 @@ HTML_PAGE = """<!doctype html>
 
     async function openCamera() {
       if (!navigator.mediaDevices?.getUserMedia) {
-        status.textContent = "Camera access is not available in this browser.";
+        status.textContent = "Opening the device camera or image picker...";
+        cameraUploadInput.click();
         return;
       }
       cameraDialog.showModal();
@@ -293,6 +296,11 @@ HTML_PAGE = """<!doctype html>
     }
 
     imageInput.addEventListener("change", () => updatePreview(imageInput.files[0] || null));
+    cameraUploadInput.addEventListener("change", () => {
+      const file = cameraUploadInput.files[0] || null;
+      cameraUploadInput.value = "";
+      if (file) updatePreview(file);
+    });
     cameraButton.addEventListener("click", openCamera);
     document.querySelector("#cancel-camera").addEventListener("click", () => cameraDialog.close());
     cameraDialog.addEventListener("close", stopCamera);
