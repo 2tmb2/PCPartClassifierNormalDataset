@@ -105,6 +105,8 @@ HTML_PAGE = """<!doctype html>
     button:hover { background: var(--green-dark); }
     button:active { transform: translateY(1px); }
     button:disabled { cursor: wait; opacity: .65; }
+    #select-image { background: #a13d2c; }
+    #select-image:hover { background: #7f3024; }
     #camera-dialog {
       width: min(680px, calc(100% - 24px));
       border: 1px solid var(--line);
@@ -154,7 +156,7 @@ HTML_PAGE = """<!doctype html>
       main { grid-template-columns: 1fr; width: min(100% - 24px, 600px); margin: 12px auto; gap: 12px; }
       .panel { padding: 17px; }
       select, input, button { font-size: 16px; }
-      #open-camera { min-height: 50px; margin-bottom: 12px; }
+      #select-image { min-height: 50px; }
       .preview { height: min(42dvh, 320px); min-height: 200px; aspect-ratio: 4 / 3; }
       .preview img { max-height: 100%; }
       #camera-dialog { max-height: calc(100dvh - 24px); overflow-y: auto; padding: 14px; }
@@ -177,19 +179,18 @@ HTML_PAGE = """<!doctype html>
       <div class="field">
         <div class="image-sources">
           <div>
-            <label for="image">Browse this computer</label>
-            <input id="image" type="file" accept="image/*" disabled>
+            <label for="select-image">Camera or computer</label>
+            <input id="image" type="file" accept="image/*" capture="environment" hidden disabled>
+            <button id="select-image" type="button" disabled>Select image</button>
           </div>
           <div>
-            <label for="uploaded-file">Select a file</label>
+            <label for="uploaded-file">From uploaded files</label>
             <select id="uploaded-file" disabled>
               <option value="">Loading uploaded files...</option>
             </select>
           </div>
         </div>
       </div>
-      <input id="camera-upload" type="file" accept="image/*" capture="environment" hidden>
-      <button id="open-camera" type="button" disabled>Take a photo</button>
       <div id="preview" class="preview">Choose an image to preview it.</div>
     </section>
     <section class="panel" aria-label="Prediction controls and result">
@@ -233,11 +234,10 @@ HTML_PAGE = """<!doctype html>
   </dialog>
   <script>
     const imageInput = document.querySelector("#image");
-    const cameraUploadInput = document.querySelector("#camera-upload");
     const uploadedFileSelect = document.querySelector("#uploaded-file");
     const modelSelect = document.querySelector("#model");
     const runButton = document.querySelector("#run");
-    const cameraButton = document.querySelector("#open-camera");
+    const selectImageButton = document.querySelector("#select-image");
     const cameraDialog = document.querySelector("#camera-dialog");
     const cameraVideo = document.querySelector("#camera-video");
     const status = document.querySelector("#status");
@@ -280,11 +280,6 @@ HTML_PAGE = """<!doctype html>
     }
 
     async function openCamera() {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        status.textContent = "Opening the device camera or image picker...";
-        cameraUploadInput.click();
-        return;
-      }
       cameraDialog.showModal();
       status.textContent = "Waiting for camera permission...";
       try {
@@ -297,8 +292,18 @@ HTML_PAGE = """<!doctype html>
         status.textContent = "Position the part in view, then capture a photo.";
       } catch (error) {
         cameraDialog.close();
-        status.textContent = `Could not access the camera: ${error.message}`;
+        status.textContent = "Camera unavailable. Choose or capture an image...";
+        imageInput.click();
       }
+    }
+
+    function selectImage() {
+      if (window.isSecureContext && navigator.mediaDevices?.getUserMedia) {
+        openCamera();
+        return;
+      }
+      status.textContent = "Choose or capture an image...";
+      imageInput.click();
     }
 
     async function initialize() {
@@ -315,7 +320,7 @@ HTML_PAGE = """<!doctype html>
         }
         modelSelect.disabled = options.models.length === 0;
         imageInput.disabled = options.models.length === 0;
-        cameraButton.disabled = options.models.length === 0;
+        selectImageButton.disabled = options.models.length === 0;
         uploadedFileSelect.disabled = true;
         runButton.disabled = true;
         status.textContent = options.models.length ? "Choose an image and model." : "No model checkpoints found in models/.";
@@ -343,7 +348,11 @@ HTML_PAGE = """<!doctype html>
       }
     }
 
-    imageInput.addEventListener("change", () => updatePreview(imageInput.files[0] || null));
+    imageInput.addEventListener("change", () => {
+      const file = imageInput.files[0] || null;
+      imageInput.value = "";
+      if (file) updatePreview(file);
+    });
     uploadedFileSelect.addEventListener("change", async () => {
       const fileName = uploadedFileSelect.value;
       if (!fileName) return;
@@ -363,12 +372,7 @@ HTML_PAGE = """<!doctype html>
         status.textContent = error.message;
       }
     });
-    cameraUploadInput.addEventListener("change", () => {
-      const file = cameraUploadInput.files[0] || null;
-      cameraUploadInput.value = "";
-      if (file) updatePreview(file);
-    });
-    cameraButton.addEventListener("click", openCamera);
+    selectImageButton.addEventListener("click", selectImage);
     document.querySelector("#cancel-camera").addEventListener("click", () => cameraDialog.close());
     cameraDialog.addEventListener("close", stopCamera);
     document.querySelector("#capture-photo").addEventListener("click", () => {
