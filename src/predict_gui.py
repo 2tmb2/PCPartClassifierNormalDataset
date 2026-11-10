@@ -105,8 +105,8 @@ HTML_PAGE = """<!doctype html>
     button:hover { background: var(--green-dark); }
     button:active { transform: translateY(1px); }
     button:disabled { cursor: wait; opacity: .65; }
-    #select-image { background: #a13d2c; }
-    #select-image:hover { background: #7f3024; }
+    #select-image { background: #315f73; }
+    #select-image:hover { background: #24495c; }
     #camera-dialog {
       width: min(680px, calc(100% - 24px));
       border: 1px solid var(--line);
