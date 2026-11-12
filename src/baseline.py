@@ -49,16 +49,16 @@ def main():
 
     # compute metrics for each class index
     precision, recall, fpr, f1 = compute_avg_metrics(num_classes, most_common_count, total_image_count)
-    print (f"\nAverage precision: {precision:.8f}")
-    print (f"Average recall: {recall:.8f}")
-    print (f"Average false positive rate: {fpr:.8f}")
-    print (f"Average F1: {f1:.8f}")
+    print (f"\nAverage precision: {precision:.4f}")
+    print (f"Average recall: {recall:.4f}")
+    print (f"Average false positive rate: {fpr:.4f}")
+    print (f"Average F1: {f1:.4f}")
 
     # aggregate metrics
     acc, err, cce = compute_aggregate(most_common_count, total_image_count)
-    print (f"\nAccuracy: {acc:.8f}")
-    print (f"Error Rate: {err:.8f}")
-    print (f"Categorical Cross-Entropy: {cce:.8f}")
+    print (f"\nAccuracy: {acc * 100:.2f}%")
+    print (f"Error Rate: {err * 100:.2f}%")
+    print (f"Categorical Cross-Entropy: {cce:.4f}")
 
 
 if __name__ == "__main__":
