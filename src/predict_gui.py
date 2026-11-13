@@ -438,14 +438,15 @@ HTML_PAGE = """<!doctype html>
         if (!response.ok) throw new Error(result.error || "Prediction failed.");
         document.querySelector("#actual").textContent = result.actual;
         document.querySelector("#prediction").textContent = result.predicted;
-        document.querySelector("#confidence").textContent = `Confidence: ${(result.confidence * 100).toFixed(1)}%`;
+        const confidenceLabel = result.confidence_label || "Confidence";
+        document.querySelector("#confidence").textContent = `${confidenceLabel}: ${(result.confidence * 100).toFixed(1)}%`;
         if (result.top_predictions && result.top_predictions.length > 1) {
           document.querySelector("#prediction-2").textContent = result.top_predictions[1].class;
-          document.querySelector("#confidence-2").textContent = `Confidence: ${(result.top_predictions[1].confidence * 100).toFixed(1)}%`;
+          document.querySelector("#confidence-2").textContent = `${confidenceLabel}: ${(result.top_predictions[1].confidence * 100).toFixed(1)}%`;
         }
         if (result.top_predictions && result.top_predictions.length > 2) {
           document.querySelector("#prediction-3").textContent = result.top_predictions[2].class;
-          document.querySelector("#confidence-3").textContent = `Confidence: ${(result.top_predictions[2].confidence * 100).toFixed(1)}%`;
+          document.querySelector("#confidence-3").textContent = `${confidenceLabel}: ${(result.top_predictions[2].confidence * 100).toFixed(1)}%`;
         }
         status.textContent = `Predicted with ${result.model}.`;
       } catch (error) {
@@ -474,6 +475,8 @@ class Predictor:
         self.model = None
         self.transform = None
         self.class_names = []
+        self.pca = None
+        self.classifier = None
 
     @staticmethod
     def find_models():
@@ -492,14 +495,26 @@ class Predictor:
         if model_path == self.loaded_model_path:
             return
 
-        checkpoint = torch.load(model_path, map_location="cpu", weights_only=True)
+        # These local checkpoints are trusted and may contain sklearn objects.
+        checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
         if checkpoint.get("architecture") != "resnet18":
             raise ValueError("This app supports ResNet-18 checkpoints only.")
 
         class_names = checkpoint["class_names"]
-        model = models.resnet18(weights=None)
-        model.fc = nn.Linear(model.fc.in_features, len(class_names))
-        model.load_state_dict(checkpoint["model_state_dict"])
+        classifier_type = checkpoint.get("classifier")
+        if classifier_type is None:
+            model = models.resnet18(weights=None)
+            model.fc = nn.Linear(model.fc.in_features, len(class_names))
+            model.load_state_dict(checkpoint["model_state_dict"])
+            pca = None
+            classifier = None
+        elif classifier_type in {"centroid", "svm", "pca_nearest_centroid", "pca_svm"}:
+            pca = checkpoint["pca"]
+            classifier = checkpoint["classifier_model"]
+            model = models.resnet18(weights=ResNet18_Weights.DEFAULT)
+            model.fc = nn.Identity()
+        else:
+            raise ValueError(f"Unsupported checkpoint classifier: {classifier_type}")
         model.to(self.device)
         model.eval()
 
@@ -515,6 +530,8 @@ class Predictor:
         self.model = model
         self.class_names = class_names
         self.transform = image_transform
+        self.pca = pca
+        self.classifier = classifier
         self.loaded_model_path = model_path
 
     def predict(self, model_relative_path, image_bytes, filename):
@@ -524,15 +541,48 @@ class Predictor:
       input_tensor = input_tensor.to(self.device)
 
       with torch.inference_mode():
-        probabilities = torch.softmax(self.model(input_tensor), dim=1)[0]
-        top_3_probs, top_3_indices = torch.topk(probabilities, k=3)
+        output = self.model(input_tensor)
+        confidence_label = "Confidence"
+        if self.classifier is None:
+            probabilities = torch.softmax(output, dim=1)[0]
+            class_indices = list(range(len(self.class_names)))
+        else:
+            features = self.pca.transform(output.cpu().numpy())
+            class_indices = self.classifier.classes_.tolist()
+            if hasattr(self.classifier, "predict_proba"):
+                probabilities = torch.as_tensor(
+                    self.classifier.predict_proba(features)[0]
+                )
+            else:
+                # Older checkpoints lack probabilities; show normalized scores.
+                confidence_label = "Relative score"
+                if hasattr(self.classifier, "centroids_"):
+                    distances = torch.linalg.vector_norm(
+                        torch.as_tensor(features[0])
+                        - torch.as_tensor(self.classifier.centroids_),
+                        dim=1,
+                    )
+                    scores = -distances
+                else:
+                    scores = torch.as_tensor(
+                        self.classifier.decision_function(features)[0]
+                    )
+                    if scores.ndim == 0:
+                        scores = torch.stack((-scores, scores))
+                probabilities = torch.softmax(scores, dim=0)
+        top_3_probs, top_3_indices = torch.topk(
+            probabilities, k=min(3, len(class_indices))
+        )
         top_3_probs = top_3_probs.cpu().numpy().tolist()
-        top_3_indices = top_3_indices.cpu().numpy().tolist()
+        top_3_indices = [
+            int(class_indices[index]) for index in top_3_indices.cpu().tolist()
+        ]
         
         return {
             "actual": Path(filename).name,
             "predicted": self.class_names[top_3_indices[0]],
             "confidence": top_3_probs[0],
+            "confidence_label": confidence_label,
             "top_predictions": [
                 {"class": self.class_names[idx], "confidence": conf}
                 for idx, conf in zip(top_3_indices, top_3_probs)
