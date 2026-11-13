@@ -139,9 +139,12 @@ def evaluate(
 def print_metrics(matrix: np.ndarray, class_names: list[str]) -> None:
     print("\nPer-class metrics:")
     print(
-        f"{'Class':<16} {'Precision':>10} {'Recall':>10} {'F1':>10} "
-        f"{'FPR':>10} {'Specificity':>13} {'Support':>10}"
+        f"{'Class':<16} {'Precision':>10} {'Recall':>10} {'FPR':>10} {'F1':>10}"
     )
+    precision_values = []
+    recall_values = []
+    fpr_values = []
+    f1_values = []
     for index, class_name in enumerate(class_names):
         true_positive = int(matrix[index, index])
         false_positive = int(matrix[:, index].sum() - true_positive)
@@ -151,31 +154,22 @@ def print_metrics(matrix: np.ndarray, class_names: list[str]) -> None:
         )
         precision = _ratio(true_positive, true_positive + false_positive)
         recall = _ratio(true_positive, true_positive + false_negative)
-        f1 = _ratio(2 * precision * recall, precision + recall)
         false_positive_rate = _ratio(false_positive, false_positive + true_negative)
-        specificity = _ratio(true_negative, true_negative + false_positive)
-        support = int(matrix[index, :].sum())
+        f1 = _ratio(2 * precision * recall, precision + recall)
         print(
             f"{class_name:<16} {precision:>10.4f} {recall:>10.4f} "
-            f"{f1:>10.4f} {false_positive_rate:>10.4f} "
-            f"{specificity:>13.4f} {support:>10}"
+            f"{false_positive_rate:>10.4f} {f1:>10.4f}"
         )
+        # save values for later reference
+        precision_values.append(precision)
+        recall_values.append(recall)
+        fpr_values.append(false_positive_rate)
+        f1_values.append(f1)
 
-    precision_values = [
-        _ratio(int(matrix[i, i]), int(matrix[:, i].sum()))
-        for i in range(len(class_names))
-    ]
-    recall_values = [
-        _ratio(int(matrix[i, i]), int(matrix[i, :].sum()))
-        for i in range(len(class_names))
-    ]
-    f1_values = [
-        _ratio(2 * precision * recall, precision + recall)
-        for precision, recall in zip(precision_values, recall_values)
-    ]
     print(
-        f"\nMacro average: precision={np.mean(precision_values):.4f}, "
-        f"recall={np.mean(recall_values):.4f}, f1={np.mean(f1_values):.4f}"
+        f"\nMacro average:\n  Precision: {np.mean(precision_values):.4f}\n  "
+        f"Recall={np.mean(recall_values):.4f}\n  FPR: {np.mean(fpr_values):.4f}\n  "
+        f"F1={np.mean(f1_values):.4f}"
     )
 
 
