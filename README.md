@@ -94,4 +94,4 @@ training/validation split and saves a confusion-matrix image under
 
 ## AI Disclosure
 
-AI was used in the creation of this project, primarily for UI and syntax assistance. 
+We used GitHub Copilot for the creation of this project, primarily for setting up the UI for the live demo site and for syntax assistance in code across the repo.
