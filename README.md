@@ -91,3 +91,7 @@ training/validation split and saves a confusion-matrix image under
 - `Baseline.ipynb` is an earlier baseline notebook.
 - `src/hyperparameter_search.py` runs multiple training trials on many hyperparameters and writes results under `models/pc_parts/hyperparameter_search_results/`.
 - `src/train_pca.py` and `src/train_svm.py` train models with a PCA and SVM instead of a fully connected layer. Run them the same way you would run train_pc_parts.py.
+
+## AI Disclosure
+
+AI was used in the creation of this project, primarily for UI and syntax assistance. 
