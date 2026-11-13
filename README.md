@@ -88,7 +88,7 @@ training/validation split and saves a confusion-matrix image under
 
 ## Other files
 
-- `Baseline.ipynb` is an earlier baseline notebook.
+- `baseline.py` predicts the most common class no matter the input to the classifier.
 - `src/hyperparameter_search.py` runs multiple training trials on many hyperparameters and writes results under `models/pc_parts/hyperparameter_search_results/`.
 - `src/train_pca.py` and `src/train_svm.py` train models with a PCA and SVM instead of a fully connected layer. Run them the same way you would run train_pc_parts.py.
 
